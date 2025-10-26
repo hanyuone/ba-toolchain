@@ -163,12 +163,17 @@ include_directories(SYSTEM ${Z3_INCLUDES})
 #   Everything below this line is specific to this project (user/application code).
 # ==============================================================================
 
-
 # Define the primary (minimal) example using SVF as library in an executable
-add_executable(reconstructor src/main.cpp)
+file(GLOB_RECURSE reconstructor_SRC CONFIGURE_DEPENDS
+    src/*.cpp
+)
+add_executable(reconstructor src/main.cpp ${reconstructor_SRC})
 
 # Only link against SVF; LLVM & Z3 dependencies are resolved internally
 target_link_libraries(reconstructor PRIVATE ${llvm_libs} ${SVF_LIB})
+
+# Link to include folder
+target_include_directories(reconstructor PRIVATE "${CMAKE_CURRENT_LIST_DIR}/include")
 
 # Set the executable example to install to the local directory (as prefix)
 install(TARGETS reconstructor RUNTIME DESTINATION bin)

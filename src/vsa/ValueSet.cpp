@@ -1,6 +1,26 @@
 #include <limits>
 #include <vsa/ValueSet.hpp>
 
+bool ValueSet::operator==(ValueSet &rhs) {
+    for (auto kv : this->values) {
+        auto rhsKv = rhs.values.find(kv.first);
+
+        if (rhsKv == rhs.values.end()) {
+            return false;
+        }
+
+        if (kv.second != (*rhsKv).second) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ValueSet::operator!=(ValueSet &rhs) {
+    return !this->operator==(rhs);
+}
+
 bool ValueSet::isSubset(ValueSet &rhs) {
     for (auto locMapping : this->values) {
         uint64_t region = locMapping.first;
@@ -35,7 +55,7 @@ void ValueSet::meetWith(ValueSet &rhs) {
     }
 }
 
-void ValueSet::joinWith(ValueSet &rhs) {
+void ValueSet::joinWith(ValueSet rhs) {
     // Find regions in other section to either add or join to
     for (auto it = rhs.values.begin(); it != rhs.values.end(); it++) {
         // Find corresponding regions in this
@@ -65,8 +85,8 @@ void ValueSet::widenWith(ValueSet &rhs) {
 }
 
 void ValueSet::adjust(int c) {
-    for (auto ric : this->values) {
-        ric.second.offset += c;
+    for (auto it = this->values.begin(); it != this->values.end(); it++) {
+        (*it).second.offset += c;
     }
 }
 

@@ -1,3 +1,5 @@
+#pragma once
+
 #include <AE/Core/NumericValue.h>
 
 /// @brief A reduced interval congruence - represents a range with
@@ -9,18 +11,35 @@ struct RIC {
     SVF::BoundedInt end;
     int offset;
 
+    RIC() : stride(0), start(0), end(0), offset(0) {}
+    RIC(int _offset) : stride(1), start(0), end(0), offset(_offset) {}
     RIC(int _stride, SVF::BoundedInt _start, SVF::BoundedInt _end, int _offset)
         : stride(_stride), start(_start), end(_end), offset(_offset) {}
 
-    void set(const RIC &ric);
+    bool operator==(RIC &);
+    bool operator!=(RIC &);
+
+    std::string toString();
+
+    bool isConstant();
+    int getConstant();
+
+    void set(const RIC &);
 
     bool isBottom();
     bool isTop();
-    bool isSubset(RIC &rhs);
 
-    void meetWith(RIC &rhs);
-    void joinWith(RIC &rhs);
-    void widenWith(RIC &rhs);
+    SVF::BoundedInt upper();
+    SVF::BoundedInt lower();
+
+    bool isSubset(RIC &);
+
+    void meetWith(RIC &);
+    void joinWith(RIC &);
+    void widenWith(RIC &);
+
+    RIC eq(RIC);
+    RIC le(RIC);
 };
 
 // The "bottom" of the RIC lattice has no elements, thus
@@ -32,3 +51,10 @@ const RIC BOTTOM = {1, SVF::BoundedInt::plus_infinity(),
 // we define it as a range in which every integer is contained
 const RIC TOP = {1, SVF::BoundedInt::minus_infinity(),
                  SVF::BoundedInt::plus_infinity(), 0};
+                 
+inline bool RIC::operator==(RIC &rhs) {
+    return this->stride == rhs.stride && this->start == rhs.start &&
+           this->end == rhs.end && this->offset == rhs.offset;
+}
+
+inline bool RIC::operator!=(RIC &rhs) { return !this->operator==(rhs); }

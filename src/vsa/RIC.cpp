@@ -2,6 +2,17 @@
 #include <numeric>
 #include <vsa/RIC.hpp>
 
+std::string RIC::toString() {
+    return std::to_string(this->stride) + " * [" + this->start.to_string() +
+           ", " + this->end.to_string() + "] + " + std::to_string(this->offset);
+}
+
+bool RIC::isConstant() {
+    return this->start == this->end && !this->start.is_infinity();
+}
+
+int RIC::getConstant() { return this->offset + this->start.getIntNumeral(); }
+
 void RIC::set(const RIC &ric) {
     this->offset = ric.offset;
     this->start = ric.start;
@@ -16,6 +27,14 @@ bool RIC::isBottom() {
 bool RIC::isTop() {
     return this->start.is_minus_infinity() && this->end.is_plus_infinity() &&
            this->stride == 1;
+}
+
+SVF::BoundedInt RIC::lower() {
+    return this->offset + (this->stride * this->start);
+}
+
+SVF::BoundedInt RIC::upper() {
+    return this->offset + (this->stride * this->end);
 }
 
 bool RIC::isSubset(RIC &rhs) {
@@ -41,8 +60,7 @@ bool RIC::isSubset(RIC &rhs) {
 
     // Edgecase: LHS has only one element
     if (this->start == this->end) {
-        SVF::BoundedInt singleValue =
-            this->offset + (this->stride * this->start);
+        SVF::BoundedInt singleValue = this->lower();
         SVF::BoundedInt rhsIndex = (singleValue - rhs.offset) / rhs.stride;
 
         return rhsIndex >= rhs.start && rhsIndex <= rhs.end;
@@ -54,8 +72,8 @@ bool RIC::isSubset(RIC &rhs) {
         return false;
     }
 
-    SVF::BoundedInt rawLower = this->offset + (this->stride * this->start);
-    SVF::BoundedInt rawUpper = this->offset + (this->stride * this->end);
+    SVF::BoundedInt rawLower = this->lower();
+    SVF::BoundedInt rawUpper = this->upper();
 
     SVF::BoundedInt rhsLowerIndex = (rawLower - rhs.offset) / rhs.stride;
     SVF::BoundedInt rhsUpperIndex = (rawUpper - rhs.offset) / rhs.stride;
@@ -85,11 +103,11 @@ void RIC::meetWith(RIC &rhs) {
         return;
     }
 
-    SVF::BoundedInt lhsLower = this->offset + (this->stride * this->start);
-    SVF::BoundedInt rhsLower = rhs.offset + (rhs.stride * rhs.start);
+    SVF::BoundedInt lhsLower = this->lower();
+    SVF::BoundedInt rhsLower = rhs.lower();
 
-    SVF::BoundedInt lhsUpper = this->offset + (this->stride * this->end);
-    SVF::BoundedInt rhsUpper = rhs.offset + (rhs.stride * rhs.end);
+    SVF::BoundedInt lhsUpper = this->upper();
+    SVF::BoundedInt rhsUpper = rhs.upper();
 
     // Two ranges don't overlap
     if (lhsUpper < rhsLower || rhsUpper < lhsLower) {
@@ -168,11 +186,11 @@ void RIC::joinWith(RIC &rhs) {
         return;
     }
 
-    SVF::BoundedInt lhsLower = this->offset + (this->stride * this->start);
-    SVF::BoundedInt rhsLower = rhs.offset + (rhs.stride * rhs.start);
+    SVF::BoundedInt lhsLower = this->lower();
+    SVF::BoundedInt rhsLower = rhs.lower();
 
-    SVF::BoundedInt lhsUpper = this->offset + (this->stride * this->end);
-    SVF::BoundedInt rhsUpper = rhs.offset + (rhs.stride * rhs.end);
+    SVF::BoundedInt lhsUpper = this->upper();
+    SVF::BoundedInt rhsUpper = rhs.upper();
 
     std::vector<SVF::BoundedInt> lowerCandidates = {lhsLower, rhsLower};
     SVF::BoundedInt lower = SVF::BoundedInt::min(lowerCandidates);
@@ -204,7 +222,7 @@ void RIC::widenWith(RIC &rhs) {
     if (this->stride != rhs.stride) {
         return;
     }
-    
+
     // Adjust RHS, so that the offsets are the same
     int adjust = rhs.offset - this->offset;
     if (adjust % this->stride != 0) {
@@ -221,5 +239,34 @@ void RIC::widenWith(RIC &rhs) {
 
     if (newEnd > this->end) {
         this->end = SVF::BoundedInt::plus_infinity();
+    }
+}
+
+RIC RIC::eq(RIC rhs) {
+    if (this->isConstant() && rhs.isConstant()) {
+        return RIC((int)this->getConstant() == rhs.getConstant());
+    }
+
+    RIC copy = (*this);
+    copy.meetWith(rhs);
+
+    if (copy.isBottom()) {
+        return RIC(0);
+    } else {
+        return RIC(1, 0, 1, 0);
+    }
+}
+
+RIC RIC::le(RIC rhs) {
+    if (this->isConstant() && rhs.isConstant()) {
+        return RIC((int)this->getConstant() < rhs.getConstant());
+    }
+
+    if (this->upper() <= rhs.lower()) {
+        return RIC(1);
+    } else if (rhs.upper() <= this->lower()) {
+        return RIC(0);
+    } else {
+        return RIC(1, 0, 1, 0);
     }
 }

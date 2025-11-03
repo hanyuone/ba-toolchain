@@ -74,13 +74,24 @@ void ValueSet::joinWith(ValueSet rhs) {
 /// value set. Currently can only widen in one direction.
 /// @param rhs 
 void ValueSet::widenWith(ValueSet &rhs) {
-    for (auto ric : this->values) {
-        auto rhsRegion = rhs.values.find(ric.first);
+    for (auto kv = this->values.begin(); kv != this->values.end(); kv++) {
+        auto rhsRegion = rhs.values.find((*kv).first);
         if (rhsRegion == rhs.values.end()) {
             continue;
         }
 
-        ric.second.widenWith((*rhsRegion).second);
+        (*kv).second.widenWith((*rhsRegion).second);
+    }
+}
+
+void ValueSet::narrowWith(ValueSet &rhs) {
+    for (auto kv = this->values.begin(); kv != this->values.end(); kv++) {
+        auto rhsRegion = rhs.values.find((*kv).first);
+        if (rhsRegion == rhs.values.end()) {
+            continue;
+        }
+
+        (*kv).second.narrowWith((*rhsRegion).second);
     }
 }
 

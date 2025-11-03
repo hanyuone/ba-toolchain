@@ -22,6 +22,7 @@ struct ValueSet {
     void meetWith(ValueSet &);
     void joinWith(ValueSet);
     void widenWith(ValueSet &);
+    void narrowWith(ValueSet &);
 
     void adjust(int);
 
@@ -30,5 +31,9 @@ struct ValueSet {
 
     RIC getGlobal() {
       return this->values[0];
+    }
+
+    int getConstant() {
+      return getGlobal().getConstant();
     }
 };

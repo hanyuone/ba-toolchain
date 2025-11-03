@@ -32,9 +32,7 @@ struct Snapshot {
     // Size of stack
     size_t stackSize;
 
-    ValueSet getSVFVarSet(SVF::NodeID nodeID) {
-        return this->varState[nodeID];
-    }
+    ValueSet getSVFVarSet(SVF::NodeID nodeID) { return this->varState[nodeID]; }
 
     ValueSet getALocSet(ALoc aloc) {
         return this->abstractStore.getALocSet(aloc);
@@ -42,6 +40,11 @@ struct Snapshot {
 
     ValueSet getRegisterSet(std::string reg) {
         return this->abstractStore.getRegisterSet(reg);
+    }
+
+    bool isRegister(std::string reg) {
+        return this->abstractStore.registers.find(reg) !=
+               this->abstractStore.registers.end();
     }
 
     void initSVFVar(SVF::ValVar *);
@@ -53,8 +56,8 @@ struct Snapshot {
 class VSA {
   public:
     VSA(SVF::ICFG *_icfg) : icfg(_icfg) {
-        const int N_REGISTERS = 3;
-        std::string REGISTERS[N_REGISTERS] = {"RAX", "RBX", "RCX"};
+        const int N_REGISTERS = 4;
+        std::string REGISTERS[N_REGISTERS] = {"RAX", "RBX", "RCX", "RDX"};
 
         this->svfir = SVF::PAG::getPAG();
 
@@ -74,7 +77,7 @@ class VSA {
     void handleMainFunction(const SVF::FunObjVar *);
     void analyse();
 
-    ValueSet get(SVF::NodeID, Snapshot &);
+    ValueSet getSVFVarSet(SVF::NodeID, Snapshot &);
 
     std::vector<const SVF::ICFGNode *>
     getNextNodes(const SVF::ICFGNode *) const;
@@ -87,6 +90,7 @@ class VSA {
     bool isStartOfBasicBlock(const SVF::ICFGNode *);
     bool isStartOfRetBlock(const SVF::ICFGNode *);
 
+    const SVF::ICFGNode *getBlockEnd(const SVF::ICFGNode *);
     const SVF::ICFGNode *skipBlocks(const SVF::ICFGNode *, size_t);
 
     void handleFunctionStart(const SVF::ICFGNode *);
@@ -94,6 +98,8 @@ class VSA {
     void handleFunction(const SVF::ICFGNode *);
     bool handleICFGNode(const SVF::ICFGNode *);
     void handleICFGCycle(const SVF::ICFGCycleWTO *);
+    void handleRemillRead(SVF::NodeID, const SVF::FunObjVar *);
+    void handleRemillWrite(const SVF::FunObjVar *);
     void handleCallSite(const SVF::CallICFGNode *);
 
     void updateAbsState(const SVF::SVFStmt *);
@@ -131,15 +137,9 @@ class VSA {
     /// Global variables extracted from global node
     SVFVarState globalState;
 
-    /// Flag for when we're figuring out the stack offset - VSA for RBP and RSP
-    /// are turned on in this case
-
     /// Mapping of variables (alocs, registers, SVF vars) to value sets,
     /// for the current basic block
     Snapshot blockState;
-    /// Stack of mappings
-    // TODO: add back for inter-procedural analysis
-    // std::vector<Snapshot> stateStack;
 
     /// State of variables immediately before the start of a basic block
     std::map<const SVF::ICFGNode *, Snapshot> preBasicBlock;
@@ -147,5 +147,6 @@ class VSA {
     std::map<const SVF::ICFGNode *, Snapshot> postBasicBlock;
 
     // TODO: remove once working on proper implementation
-    int readAccesses;
+    int readCalls;
+    int writeCalls;
 };

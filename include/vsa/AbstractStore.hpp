@@ -6,11 +6,13 @@
 
 /// @brief A "quasi-variable" that could contain a range of values.
 struct ALoc {
-    uint64_t location;
+    uint64_t region;
     int offset;
     size_t size;
 
     bool operator<(const ALoc &) const;
+
+    std::string toString();
 };
 
 /// @brief A mapping of registers and abstract locations to values, which
@@ -29,5 +31,7 @@ struct AbstractStore {
         return this->registers[reg];
     }
 
+    void joinWith(AbstractStore &);
     void widenWith(AbstractStore &);
+    void narrowWith(AbstractStore &);
 };

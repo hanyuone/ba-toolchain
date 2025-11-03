@@ -238,7 +238,33 @@ void RIC::widenWith(RIC &rhs) {
     }
 
     if (newEnd > this->end) {
+        std::cout << "Widening end from " << this->end << std::endl;
         this->end = SVF::BoundedInt::plus_infinity();
+    }
+}
+
+void RIC::narrowWith(RIC &rhs) {
+    // Ignore cases where strides are different
+    if (this->stride != rhs.stride) {
+        return;
+    }
+
+    // Adjust RHS, so that the offsets are the same
+    int adjust = rhs.offset - this->offset;
+    if (adjust % this->stride != 0) {
+        return;
+    }
+
+    int adjustSteps = adjust / this->stride;
+    SVF::BoundedInt newStart = rhs.start - adjustSteps;
+    SVF::BoundedInt newEnd = rhs.end - adjustSteps;
+
+    if (this->start.is_minus_infinity()) {
+        this->start = newStart;
+    }
+
+    if (this->end.is_plus_infinity()) {
+        this->end = newEnd;
     }
 }
 
@@ -258,6 +284,8 @@ RIC RIC::eq(RIC rhs) {
 }
 
 RIC RIC::le(RIC rhs) {
+    std::cout << "Comparing " << this->toString() << " and " << rhs.toString() << std::endl;
+    
     if (this->isConstant() && rhs.isConstant()) {
         return RIC((int)this->getConstant() < rhs.getConstant());
     }

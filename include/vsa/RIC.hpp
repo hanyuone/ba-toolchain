@@ -37,6 +37,7 @@ struct RIC {
     void meetWith(RIC &);
     void joinWith(RIC &);
     void widenWith(RIC &);
+    void narrowWith(RIC &);
 
     RIC eq(RIC);
     RIC le(RIC);

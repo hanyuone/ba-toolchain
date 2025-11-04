@@ -1,19 +1,50 @@
 #include <vsa/AbstractStore.hpp>
 
 bool ALoc::operator<(const ALoc &rhs) const {
-    return this->region < rhs.region || this->offset < rhs.offset ||
-           this->size < rhs.size;
+    if (this->region < rhs.region) {
+        return true;
+    }
+
+    if (this->region > rhs.region) {
+        return false;
+    }
+
+    if (this->offset < rhs.offset) {
+        return true;
+    }
+
+    if (this->offset > rhs.offset) {
+        return false;
+    }
+
+    if (this->size < rhs.size) {
+        return true;
+    }
+
+    if (this->size > rhs.size) {
+        return false;
+    }
+
+    return false;
+}
+
+bool ALoc::in(RIC ric) {
+    int alocUpper = this->offset + this->size;
+
+    return (ric.lower() >= this->offset && ric.lower() < alocUpper) ||
+           (ric.upper() >= this->offset && ric.upper() < alocUpper);
 }
 
 std::string ALoc::toString() {
     return "mem" + std::to_string(this->region) + "_" +
-           std::to_string(this->offset);
+           std::to_string(this->offset) + "_" + std::to_string(this->size);
 }
 
 bool AbstractStore::operator==(AbstractStore &rhs) {
     // Iterate over a-loc mapping
     for (auto kv : this->alocs) {
-        auto rhsKv = rhs.alocs.find(kv.first);
+        ALoc aloc = kv.first;
+        auto rhsKv = rhs.alocs.find(aloc);
 
         if (rhsKv == rhs.alocs.end()) {
             return false;
@@ -47,21 +78,19 @@ void AbstractStore::joinWith(AbstractStore &rhs) {
 
         if (thisCandidate != this->alocs.end()) {
             (*thisCandidate).second.joinWith(kv.second);
-            std::cout << "ALoc at offset " << (*thisCandidate).first.offset
-                      << " now has value "
-                      << (*thisCandidate).second.getGlobal().toString()
-                      << std::endl;
         } else {
             this->alocs.insert({aloc, kv.second});
         }
     }
 
-    for (auto kv : this->registers) {
+    for (auto kv : rhs.registers) {
         auto reg = kv.first;
-        auto rhsCandidate = rhs.registers.find(reg);
+        auto thisCandidate = this->registers.find(reg);
 
-        if (rhsCandidate != rhs.registers.end()) {
-            kv.second.joinWith((*rhsCandidate).second);
+        if (thisCandidate != this->registers.end()) {
+            (*thisCandidate).second.joinWith(kv.second);
+        } else {
+            this->registers.insert({reg, kv.second});
         }
     }
 }

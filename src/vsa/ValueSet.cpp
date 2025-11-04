@@ -21,6 +21,36 @@ bool ValueSet::operator!=(ValueSet &rhs) {
     return !this->operator==(rhs);
 }
 
+ValueSet ValueSet::operator+(ValueSet rhs) {
+    if (this->getGlobal().isConstant() && rhs.getGlobal().isConstant()) {
+        return ValueSet(this->getConstant() + rhs.getConstant());
+    } else if (this->getGlobal().isConstant()) {
+        return rhs + (*this);
+    } else if (rhs.getGlobal().isConstant()) {
+        ValueSet vs = (*this);
+        vs.adjust(rhs.getConstant());
+        return vs;
+    } else {
+        ValueSet vs;
+        vs.top = true;
+        return vs;
+    }
+}
+
+bool ValueSet::isTop() {
+    return this->top;
+}
+
+bool ValueSet::isBottom() {
+    for (auto kv : this->values) {
+        if (!kv.second.isBottom()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool ValueSet::isSubset(ValueSet &rhs) {
     for (auto locMapping : this->values) {
         uint64_t region = locMapping.first;
@@ -97,7 +127,9 @@ void ValueSet::narrowWith(ValueSet &rhs) {
 
 void ValueSet::adjust(int c) {
     for (auto it = this->values.begin(); it != this->values.end(); it++) {
-        (*it).second.offset += c;
+        // TODO: handle other infinite cases
+        if (!(*it).second.end.is_plus_infinity())
+            (*it).second.offset += c;
     }
 }
 
@@ -111,4 +143,15 @@ void ValueSet::removeUpperBounds() {
     for (auto ric : this->values) {
         ric.second.end = SVF::BoundedInt::plus_infinity();
     }
+}
+
+std::string ValueSet::toString() {
+    std::string vsString = "{";
+
+    for (auto kv : this->values) {
+        vsString += "region" + std::to_string(kv.first) + ": " + kv.second.toString() + ", ";
+    }
+
+    vsString += "}";
+    return vsString;
 }

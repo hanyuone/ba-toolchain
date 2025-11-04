@@ -172,6 +172,8 @@ void RIC::meetWith(RIC &rhs) {
 /// @brief Overwrite this RIC with the union (join) of this and another RIC.
 /// @param rhs The RIC to join with.
 void RIC::joinWith(RIC &rhs) {
+    std::cout << "Trying to join " << this->toString() << " and " << rhs.toString() << std::endl;
+
     if (this->isTop() || rhs.isBottom()) {
         return;
     }
@@ -184,6 +186,27 @@ void RIC::joinWith(RIC &rhs) {
     if (rhs.isTop()) {
         this->set(TOP);
         return;
+    }
+
+    if (this->isConstant() && rhs.isConstant()) {
+        int thisConstant = this->getConstant();
+        int rhsConstant = rhs.getConstant();
+
+        if (thisConstant == rhsConstant) {
+            return;
+        }
+
+        this->stride = std::abs(thisConstant - rhsConstant);
+        this->start = 0;
+        this->end = 1;
+        this->offset = std::min(thisConstant, rhsConstant);
+        return;
+    }
+
+    if (this->isConstant()) {
+        this->stride = rhs.stride;
+    } else if (rhs.isConstant()) {
+        rhs.stride = this->stride;
     }
 
     SVF::BoundedInt lhsLower = this->lower();
@@ -218,6 +241,12 @@ void RIC::joinWith(RIC &rhs) {
 }
 
 void RIC::widenWith(RIC &rhs) {
+    std::cout << "Trying to widen " << this->toString() << " and " << rhs.toString() << std::endl;
+
+    if (this->isConstant()) {
+        this->stride = rhs.stride;
+    }
+
     // Ignore cases where strides are different
     if (this->stride != rhs.stride) {
         return;
@@ -238,7 +267,6 @@ void RIC::widenWith(RIC &rhs) {
     }
 
     if (newEnd > this->end) {
-        std::cout << "Widening end from " << this->end << std::endl;
         this->end = SVF::BoundedInt::plus_infinity();
     }
 }
@@ -268,6 +296,16 @@ void RIC::narrowWith(RIC &rhs) {
     }
 }
 
+bool RIC::contains(int val) {
+    int offsetOfOffset = val - this->offset;
+    if (offsetOfOffset % this->stride != 0) {
+        return false;
+    }
+
+    int strideIndex = offsetOfOffset / this->stride;
+    return strideIndex >= this->start && strideIndex <= this->end;
+}
+
 RIC RIC::eq(RIC rhs) {
     if (this->isConstant() && rhs.isConstant()) {
         return RIC((int)this->getConstant() == rhs.getConstant());
@@ -284,8 +322,6 @@ RIC RIC::eq(RIC rhs) {
 }
 
 RIC RIC::le(RIC rhs) {
-    std::cout << "Comparing " << this->toString() << " and " << rhs.toString() << std::endl;
-    
     if (this->isConstant() && rhs.isConstant()) {
         return RIC((int)this->getConstant() < rhs.getConstant());
     }

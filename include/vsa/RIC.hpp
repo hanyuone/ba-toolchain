@@ -11,7 +11,7 @@ struct RIC {
     SVF::BoundedInt end;
     int offset;
 
-    RIC() : stride(0), start(0), end(0), offset(0) {}
+    RIC() : stride(1), start(SVF::BoundedInt::plus_infinity()), end(SVF::BoundedInt::minus_infinity()), offset(0) {}
     RIC(int _offset) : stride(1), start(0), end(0), offset(_offset) {}
     RIC(int _stride, SVF::BoundedInt _start, SVF::BoundedInt _end, int _offset)
         : stride(_stride), start(_start), end(_end), offset(_offset) {}
@@ -38,6 +38,8 @@ struct RIC {
     void joinWith(RIC &);
     void widenWith(RIC &);
     void narrowWith(RIC &);
+
+    bool contains(int);
 
     RIC eq(RIC);
     RIC le(RIC);

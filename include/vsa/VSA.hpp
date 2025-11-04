@@ -62,8 +62,7 @@ class VSA {
         this->svfir = SVF::PAG::getPAG();
 
         for (int i = 0; i < N_REGISTERS; i++) {
-            ValueSet vs;
-            this->blockState.abstractStore.registers[REGISTERS[i]] = vs;
+            this->blockState.abstractStore.registers.insert({REGISTERS[i], ValueSet()});
         }
     }
 
@@ -72,12 +71,15 @@ class VSA {
         return this->postBasicBlock[node].abstractStore;
     }
 
+    void setALocs(std::vector<ALoc>);
+
     void initWTO();
     void handleGlobalNode();
     void handleMainFunction(const SVF::FunObjVar *);
     void analyse();
 
     ValueSet getSVFVarSet(SVF::NodeID, Snapshot &);
+    std::pair<std::vector<ALoc>, std::vector<ALoc>> getALocsByAccessSize(ValueSet, size_t);
 
     std::vector<const SVF::ICFGNode *>
     getNextNodes(const SVF::ICFGNode *) const;
@@ -86,7 +88,7 @@ class VSA {
     bool mergeStatesFromPredecessors(const SVF::ICFGNode *, AbstractStore &);
 
     bool isBranchFeasible(const SVF::IntraCFGEdge *, Snapshot &);
-    bool isCmpBranchFeasible(const SVF::CmpStmt *, SVF::s64_t, SVFVarState &);
+    bool isCmpBranchFeasible(const SVF::CmpStmt *, SVF::s64_t, Snapshot &);
     bool isStartOfBasicBlock(const SVF::ICFGNode *);
     bool isStartOfRetBlock(const SVF::ICFGNode *);
 
@@ -98,8 +100,8 @@ class VSA {
     void handleFunction(const SVF::ICFGNode *);
     bool handleICFGNode(const SVF::ICFGNode *);
     void handleICFGCycle(const SVF::ICFGCycleWTO *);
-    void handleRemillRead(SVF::NodeID, const SVF::FunObjVar *);
-    void handleRemillWrite(const SVF::FunObjVar *);
+    void handleRemillRead(SVF::NodeID, SVF::NodeID, size_t);
+    void handleRemillWrite(SVF::NodeID, SVF::NodeID, size_t);
     void handleCallSite(const SVF::CallICFGNode *);
 
     void updateAbsState(const SVF::SVFStmt *);

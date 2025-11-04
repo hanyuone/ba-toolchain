@@ -36,7 +36,12 @@ int main(int argc, char *argv[]) {
     icfg->dump(pag->getModuleIdentifier() + ".icfg");
 
     /// VSA analysis
+    std::vector<ALoc> alocs = {ALoc{1, 12, 4},  ALoc{1, 16, 4}, ALoc{1, 20, 4},
+                               ALoc{1, 24, 8},  ALoc{1, 32, 8}, ALoc{1, 40, 8},
+                               ALoc{1, 48, 40}, ALoc{1, 88, 8}};
+
     VSA vsa(icfg);
+    vsa.setALocs(alocs);
     vsa.analyse();
 
     /// Value-Flow Graph (VFG)

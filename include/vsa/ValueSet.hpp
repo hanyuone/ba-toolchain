@@ -9,6 +9,7 @@
 /// (represented as uints) to *offsets* from the start of that
 /// region.
 struct ValueSet {
+    bool top;
     std::map<uint64_t, RIC> values;
 
     ValueSet() {}
@@ -16,6 +17,10 @@ struct ValueSet {
 
     bool operator==(ValueSet &);
     bool operator!=(ValueSet &);
+    ValueSet operator+(ValueSet);
+
+    bool isTop();
+    bool isBottom();
 
     bool isSubset(ValueSet &);
 
@@ -29,11 +34,9 @@ struct ValueSet {
     void removeLowerBounds();
     void removeUpperBounds();
 
-    RIC getGlobal() {
-      return this->values[0];
-    }
+    std::string toString();
 
-    int getConstant() {
-      return getGlobal().getConstant();
-    }
+    RIC getGlobal() { return this->values[0]; }
+
+    int getConstant() { return getGlobal().getConstant(); }
 };

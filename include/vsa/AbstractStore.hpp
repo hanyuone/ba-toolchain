@@ -11,7 +11,9 @@ struct ALoc {
     size_t size;
 
     bool operator<(const ALoc &) const;
+    bool operator==(ALoc &);
 
+    bool in(RIC);
     std::string toString();
 };
 

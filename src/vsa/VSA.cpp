@@ -78,6 +78,18 @@ SVF::Map<SVF::s32_t, SVF::s32_t> _switch_lhsrhs_predicate = {
      SVF::CmpStmt::Predicate::ICMP_SLE}, // >= -> <=
 };
 
+const std::map<std::string, size_t> READ_FNS_TO_SIZES = {
+    {"__remill_read_memory_8", 1},
+    {"__remill_read_memory_16", 2},
+    {"__remill_read_memory_32", 4},
+    {"__remill_read_memory_64", 8}};
+
+const std::map<std::string, size_t> WRITE_FNS_TO_SIZES = {
+    {"__remill_write_memory_8", 1},
+    {"__remill_write_memory_16", 2},
+    {"__remill_write_memory_32", 4},
+    {"__remill_write_memory_64", 8}};
+
 void Snapshot::initSVFVar(SVF::ValVar *valVar) {
     SVF::NodeID varId = valVar->getId();
 
@@ -91,6 +103,12 @@ void Snapshot::initSVFVar(SVF::ValVar *valVar) {
     }
 
     return;
+}
+
+void VSA::setALocs(std::vector<ALoc> alocs) {
+    for (ALoc aloc : alocs) {
+        this->blockState.abstractStore.alocs[aloc] = ValueSet();
+    }
 }
 
 /// @brief Finds any recursive functions. Also finds any loops within a
@@ -195,8 +213,9 @@ void VSA::analyse() {
 
 /// @brief Find the value set of an SVF variable, given a specific snapshot.
 /// This function will also look through *global* variables.
-/// @param id
-/// @param snapshot
+/// @param id the ID of that variable
+/// @param snapshot the snapshot that we're trying to find our variable's
+/// state in
 /// @return
 ValueSet VSA::getSVFVarSet(SVF::NodeID id, Snapshot &snapshot) {
     // Find in globals
@@ -207,6 +226,41 @@ ValueSet VSA::getSVFVarSet(SVF::NodeID id, Snapshot &snapshot) {
     }
 
     return snapshot.getSVFVarSet(id);
+}
+
+/// @brief Implements `*(vs, s)` as defined in Balakrishnan, Reps (2004).
+/// Looks through `vs` and returns two sets of ALocs `F` and `P` - `F`
+/// represents all "fully accessed" ALocs (ones whose starting addresses are
+/// in `vs` and have size `s`), and `P` represents all "partially accessed"
+/// ones (ALoc at starting address is not of size `s`, in `vs` but does not
+/// satisfy rules for `F`).
+/// @param vs value set containing our ALocs
+/// @param s size of data access
+/// @return Two sets representing `F` and `P`.
+std::pair<std::vector<ALoc>, std::vector<ALoc>>
+VSA::getALocsByAccessSize(ValueSet vs, size_t s) {
+    std::vector<ALoc> fullAccess;
+    std::vector<ALoc> partialAccess;
+
+    for (auto kv : this->blockState.abstractStore.alocs) {
+        ALoc aloc = kv.first;
+
+        auto vsRegion = vs.values.find(aloc.region);
+        if (vsRegion == vs.values.end()) {
+            continue;
+        }
+
+        bool alocInValueSet = aloc.in((*vsRegion).second);
+        bool alocStartInValueSet = (*vsRegion).second.contains(aloc.offset);
+
+        if (alocStartInValueSet && aloc.size == s) {
+            fullAccess.push_back(aloc);
+        } else if (alocStartInValueSet || alocInValueSet) {
+            partialAccess.push_back(aloc);
+        }
+    }
+
+    return std::pair(fullAccess, partialAccess);
 }
 
 /**
@@ -375,7 +429,7 @@ bool VSA::mergeStatesFromPredecessors(const SVF::ICFGNode *node,
 /// @param trace the abstract trace post-previous block
 /// @return
 bool VSA::isBranchFeasible(const SVF::IntraCFGEdge *intraEdge,
-                           Snapshot &blockState) {
+                           Snapshot &snapshot) {
     const SVF::SVFVar *cmpVar = intraEdge->getCondition();
     assert(!cmpVar->getInEdges().empty() && "no in edges?");
     SVF::SVFStmt *cmpVarInStmt = *cmpVar->getInEdges().begin();
@@ -383,8 +437,11 @@ bool VSA::isBranchFeasible(const SVF::IntraCFGEdge *intraEdge,
     // No switch statements in lifted binaries
     const SVF::CmpStmt *cmpStmt =
         SVF::SVFUtil::dyn_cast<SVF::CmpStmt>(cmpVarInStmt);
-    return isCmpBranchFeasible(cmpStmt, intraEdge->getSuccessorCondValue(),
-                               blockState.varState);
+
+    bool isFeasible = isCmpBranchFeasible(
+        cmpStmt, intraEdge->getSuccessorCondValue(), snapshot);
+
+    return isFeasible;
 }
 
 /// @brief
@@ -393,8 +450,8 @@ bool VSA::isBranchFeasible(const SVF::IntraCFGEdge *intraEdge,
 /// @param preds
 /// @return
 bool VSA::isCmpBranchFeasible(const SVF::CmpStmt *cmpStmt, SVF::s64_t succ,
-                              SVFVarState &varState) {
-    SVFVarState newVarState = varState;
+                              Snapshot &snapshot) {
+    SVFVarState newVarState = snapshot.varState;
 
     // get cmp stmt's op0, op1, and predicate
     SVF::NodeID op0 = cmpStmt->getOpVarID(0);
@@ -408,7 +465,7 @@ bool VSA::isCmpBranchFeasible(const SVF::CmpStmt *cmpStmt, SVF::s64_t succ,
          newVarState.find(op0) == newVarState.end()) ||
         (this->globalState.find(op1) == this->globalState.end() &&
          newVarState.find(op1) == newVarState.end())) {
-        varState = newVarState;
+        snapshot.varState = newVarState;
         return true;
     }
 
@@ -445,19 +502,10 @@ bool VSA::isCmpBranchFeasible(const SVF::CmpStmt *cmpStmt, SVF::s64_t succ,
     // for const X const, we may get concrete resVal instantly
     // for var X const, we may get [0,1] if the intersection of var and const is
     // not empty set
-    std::cout << "Result ID: " << res_id << std::endl;
-
-    for (auto kv : newVarState) {
-        std::cout << "Node " << kv.first << " has value "
-                  << kv.second.getGlobal().toString() << std::endl;
-    }
 
     RIC resVal = newVarState[res_id].getGlobal();
-    std::cout << "Result RIC: " << resVal.toString() << std::endl;
     RIC succRic(succ);
-    std::cout << "Successor RIC: " << succRic.toString() << std::endl;
     resVal.meetWith(succRic);
-    std::cout << "Meet result: " << resVal.toString() << std::endl;
 
     // If Var X const generates bottom value, it means this branch path is not
     // feasible.
@@ -465,24 +513,34 @@ bool VSA::isCmpBranchFeasible(const SVF::CmpStmt *cmpStmt, SVF::s64_t succ,
         return false;
     }
 
-    bool b0 = newVarState[op0].getGlobal().isConstant();
-    bool b1 = newVarState[op1].getGlobal().isConstant();
+    ValueSet op0vs = newVarState[op0];
+
+    ValueSet op1vs;
+    if (this->globalState.find(op1) != this->globalState.end()) {
+        op1vs = this->globalState[op1];
+    } else {
+        op1vs = newVarState[op1];
+    }
+
+    bool b0 = op0vs.getGlobal().isConstant();
+    bool b1 = op1vs.getGlobal().isConstant();
 
     // if const X var, we should reverse op0 and op1.
     if (b0 && !b1) {
         std::swap(op0, op1);
+        std::swap(op0vs, op1vs);
         std::swap(load_op0, load_op1);
         predicate = _switch_lhsrhs_predicate[predicate];
     } else {
         // if var X var, we cannot preset the branch condition to infer the
         // intervals of var0,var1
         if (!b0 && !b1) {
-            varState = newVarState;
+            snapshot.varState = newVarState;
             return true;
         }
         // if const X const, we can instantly get the resVal
         else if (b0 && b1) {
-            varState = newVarState;
+            snapshot.varState = newVarState;
             return true;
         }
     }
@@ -498,8 +556,8 @@ bool VSA::isCmpBranchFeasible(const SVF::CmpStmt *cmpStmt, SVF::s64_t succ,
     // AddressValue addrs;
     // if (load_op0 && newPreds.inVarToAddrsTable(load_op0->getRHSVarID()))
     //     addrs = newPreds[load_op0->getRHSVarID()].getAddrs();
-    RIC lhs = newVarState[op0].getGlobal();
-    RIC rhs = newVarState[op1].getGlobal();
+    RIC lhs = op0vs.getGlobal();
+    RIC rhs = op1vs.getGlobal();
 
     switch (predicate) {
     case SVF::CmpStmt::Predicate::ICMP_EQ:
@@ -564,6 +622,7 @@ bool VSA::isCmpBranchFeasible(const SVF::CmpStmt *cmpStmt, SVF::s64_t succ,
         */
     }
 
+    // Update variable
     newVarState[op0].values[0] = lhs;
 
     /*
@@ -630,7 +689,26 @@ bool VSA::isCmpBranchFeasible(const SVF::CmpStmt *cmpStmt, SVF::s64_t succ,
     }
     */
 
-    varState = newVarState;
+    // Update the relevant place that the variable was retrieved from
+    const SVF::ValVar *op0Var =
+        SVF::SVFUtil::dyn_cast<SVF::ValVar>(cmpStmt->getOpVar(0));
+    const SVF::ICFGNode *op0Node = op0Var->getICFGNode();
+
+    // Value of node was retrieved from call function
+    if (const SVF::CallICFGNode *callNode =
+            SVF::SVFUtil::dyn_cast<SVF::CallICFGNode>(op0Var->getICFGNode())) {
+        size_t size = READ_FNS_TO_SIZES.at(callNode->getCalledFunction()->getName());
+
+        SVF::NodeID addrId = callNode->getArgument(1)->getId();
+        ValueSet addrValueSet = snapshot.getSVFVarSet(addrId);
+
+        // TODO: change region when implementing interprocedural VSA
+        ALoc aloc{1, addrValueSet.values[1].getConstant(), size};
+        snapshot.abstractStore.alocs[aloc].values[0] = lhs;
+        
+    }
+
+    snapshot.varState = newVarState;
     return true;
 }
 
@@ -794,7 +872,6 @@ void VSA::handleFunction(const SVF::ICFGNode *funEntry) {
     const SVF::ICFGNode *endPrevBlock = getBlockEnd(pastSkippedBlocks);
 
     Snapshot snapshot = this->blockState;
-    std::cout << "Stack size: " << snapshot.stackSize << std::endl;
     this->postBasicBlock.insert({endPrevBlock, snapshot});
 
     pastSkippedBlocks = getNextNodes(endPrevBlock)[0];
@@ -890,6 +967,7 @@ void VSA::handleICFGCycle(const SVF::ICFGCycleWTO *cycle) {
             mergeStatesFromPredecessors(head, curAs);
 
             if (increasing) {
+                // We widen
                 AbstractStore widened = preAs;
                 widened.widenWith(curAs);
                 curAs = widened;
@@ -899,27 +977,22 @@ void VSA::handleICFGCycle(const SVF::ICFGCycleWTO *cycle) {
                     increasing = false;
                     continue;
                 }
-
-                std::cout << "Abstract store widened" << std::endl;
             } else {
                 // We now narrow
-                std::cout << "Before narrowing: " << preAs.alocs[ALoc{1, 12, 4}].getGlobal().toString() << std::endl;
                 AbstractStore narrowed = preAs;
                 narrowed.narrowWith(curAs);
                 curAs = narrowed;
-                std::cout << "After narrowing: " << curAs.alocs[ALoc{1, 12, 4}].getGlobal().toString() << std::endl;
 
                 if (narrowed == preAs) {
                     // We've reached the narrow fixed point
-					break;
-				}
-
-                std::cout << "Abstract store narrowed" << std::endl;
+                    break;
+                }
             }
 
             // Handle head
             this->preBasicBlock[head].abstractStore = curAs;
-            this->blockState.abstractStore = this->preBasicBlock[head].abstractStore;
+            this->blockState.abstractStore =
+                this->preBasicBlock[head].abstractStore;
 
             for (const SVF::SVFStmt *stmt : head->getSVFStmts()) {
                 updateAbsState(stmt);
@@ -964,7 +1037,6 @@ bool VSA::handleICFGNode(const SVF::ICFGNode *node) {
     bool isStart = isStartOfBasicBlock(node);
 
     if (isStart) {
-        std::cout << "Going through starting node " << node->getId() << std::endl;
         AbstractStore tmpEs;
         bool is_feasible = mergeStatesFromPredecessors(node, tmpEs);
 
@@ -975,7 +1047,8 @@ bool VSA::handleICFGNode(const SVF::ICFGNode *node) {
         }
 
         this->preBasicBlock[node].abstractStore = tmpEs;
-        this->blockState.abstractStore = this->preBasicBlock[node].abstractStore;
+        this->blockState.abstractStore =
+            this->preBasicBlock[node].abstractStore;
 
         for (const SVF::SVFStmt *stmt : node->getSVFStmts()) {
             updateAbsState(stmt);
@@ -986,7 +1059,6 @@ bool VSA::handleICFGNode(const SVF::ICFGNode *node) {
             handleCallSite(callNode);
         }
     } else {
-        std::cout << "Going through node " << node->getId() << std::endl;
         // If we're not in the start of a basic block, then the abstract
         // state updating/fixpoint-checking doesn't apply
         for (const SVF::SVFStmt *stmt : node->getSVFStmts()) {
@@ -1002,120 +1074,67 @@ bool VSA::handleICFGNode(const SVF::ICFGNode *node) {
     return true;
 }
 
-void VSA::handleRemillRead(SVF::NodeID retId, const SVF::FunObjVar *callee) {
-    ValueSet vs1;
-    vs1.values[1] = RIC(48);
+void VSA::handleRemillRead(SVF::NodeID retId, SVF::NodeID addrId, size_t size) {
+    ValueSet addrValueSet = this->blockState.getSVFVarSet(addrId);
+    auto alocs = getALocsByAccessSize(addrValueSet, size);
+    std::vector<ALoc> fullAccesses = alocs.first;
+    std::vector<ALoc> partialAccesses = alocs.second;
 
-    ValueSet vs10;
-    vs10.values[0] = RIC(1, 0, 1, 0);
+    if (partialAccesses.empty()) {
+        ValueSet newRetSet;
 
-    ValueSet vs18;
-    vs18.values[0] = RIC(1, 0, SVF::BoundedInt::plus_infinity(), 0);
+        for (ALoc aloc : fullAccesses) {
+            ValueSet alocValueSet = this->blockState.getALocSet(aloc);
+            newRetSet.joinWith(alocValueSet);
+        }
 
-    ValueSet vs26;
-    vs26.values[0] = RIC(1, 0, 5, 0);
-
-    ValueSet vs27;
-    vs27.values[1] = RIC(48);
-
-    const size_t TOTAL_READS = 33;
-    ValueSet mockValueSets[TOTAL_READS] = {
-        // mov rax, QWORD PTR fs:0x28
-        ValueSet(0),
-        // lea rax, [rbp-0x30]
-        // mov QWORD PTR [rbp-0x48], rax
-        // mov rax, QWORD PTR [rbp-0x48]
-        vs1,
-        // == First loop runthrough ==
-        // cmp DWORD PTR [rbp-0x54], 0x4
-        ValueSet(0),
-        // mov rax, QWORD PTR [rbp-0x48]
-        ValueSet(0),
-        // mov edx, DWORD PTR [rbp-0x50]
-        ValueSet(0),
-        // mov rax, QWORD PTR [rbp-0x40]
-        ValueSet(0),
-        // mov edx, DWORD PTR [rbp-0x4c]
-        ValueSet(0),
-        // add QWORD PTR [rbp-0x48], 0x4
-        ValueSet(0),
-        // add QWORD PTR [rbp-0x40], 0x4
-        ValueSet(0),
-        // add DWORD PTR [rbp-0x54], 0x1
-        ValueSet(0),
-        // Reads 10 to 17 is where we widen
-        vs10,
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        // Reads 18 to 25 is where we narrow
-        vs18,
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        ValueSet(0),
-        // For loop check
-        vs26,
-        // mov rax, QWORD PTR [rbp-0x38]
-        vs27,
-        // mov eax, DWORD PTR [rax]
-        ValueSet(5),
-        // mov rax, QWORD PTR fs:0x28
-        // mov QWORD PTR [rbp-0x8], rax
-        // ...
-        // mov rdx, QWORD PTR [rbp-0x8]
-        ValueSet(0),
-        // sub rdx, QWORD PTR fs:0x28
-        ValueSet(0),
-        // leave
-        ValueSet(0),
-        // ret
-        ValueSet(0),
-    };
-
-    this->blockState.varState[retId] = mockValueSets[this->readCalls];
-    std::cout << "this->readCalls = " << this->readCalls << std::endl;
-    this->readCalls++;
+        this->blockState.varState[retId] = newRetSet;
+    } else {
+        this->blockState.varState[retId].top = true;
+        this->blockState.varState[retId].values.clear();
+    }
 }
 
-void VSA::handleRemillWrite(const SVF::FunObjVar *callee) {
-    // For vsa.ll, represents address [rbp-54] of size 4,
-    // which contains an incrementing index
-    ALoc aloc_m54{1, 12, 4};
+void VSA::handleRemillWrite(SVF::NodeID addrId, SVF::NodeID valueId,
+                            size_t size) {
+    ValueSet addrValueSet = this->blockState.getSVFVarSet(addrId);
+    ValueSet valueValueSet = this->getSVFVarSet(valueId, this->blockState);
 
-    // Initial ALocs
-    std::map<ALoc, ValueSet> alocs4;
-    alocs4.insert({aloc_m54, 0});
+    auto alocs = getALocsByAccessSize(addrValueSet, size);
+    std::vector<ALoc> fullAccesses = alocs.first;
+    std::vector<ALoc> partialAccesses = alocs.second;
 
-    // After one iteration of loop
-    ValueSet vs1;
-    vs1.values[0] = RIC(1, 0, 1, 0);
-    std::map<ALoc, ValueSet> alocs11;
-    alocs11.insert({aloc_m54, vs1});
+    // Create temporary abstract store
+    AbstractStore tmp = this->blockState.abstractStore;
 
-    // After widening
-    ValueSet vs5;
-    vs5.values[0] = RIC(1, 0, 5, 0);
-    std::map<ALoc, ValueSet> alocs16;
-    alocs16.insert({aloc_m54, vs5});
-
-    if (this->writeCalls == 4) {
-        this->blockState.abstractStore.alocs = alocs4;
-    } else if (this->writeCalls == 11) {
-        this->blockState.abstractStore.alocs = alocs11;
-    } else if (this->writeCalls == 16) {
-        this->blockState.abstractStore.alocs = alocs16;
+    // Clear all (full + partial) accesses
+    for (auto aloc : fullAccesses) {
+        tmp.alocs[aloc] = ValueSet();
     }
 
-    std::cout << "this->writeCalls = " << this->writeCalls << std::endl;
-    this->writeCalls++;
+    for (auto aloc : partialAccesses) {
+        // Replace partial accesses with TOP
+        tmp.alocs[aloc] = ValueSet();
+        tmp.alocs[aloc].top = true;
+    }
+
+    if (fullAccesses.size() == 1 && partialAccesses.empty()) {
+        // Strong update
+        ALoc access = fullAccesses[0];
+        tmp.alocs[access] = valueValueSet;
+    } else {
+        // Weak update
+        for (auto aloc : fullAccesses) {
+            auto alocValueSet = this->blockState.abstractStore.alocs.find(aloc);
+            if (alocValueSet == this->blockState.abstractStore.alocs.end()) {
+                continue;
+            }
+
+            tmp.alocs[aloc] = (*alocValueSet).second;
+        }
+    }
+
+    this->blockState.abstractStore = tmp;
 }
 
 /**
@@ -1135,9 +1154,16 @@ void VSA::handleCallSite(const SVF::CallICFGNode *callNode) {
     // TODO: implement *actual* read and write
     if (fun_name.rfind("__remill_read_memory", 0) == 0) {
         SVF::NodeID retId = callNode->getRetICFGNode()->getActualRet()->getId();
-        handleRemillRead(retId, callee);
+        SVF::NodeID addrId = callNode->getArgument(1)->getId();
+        size_t size = READ_FNS_TO_SIZES.at(fun_name);
+
+        handleRemillRead(retId, addrId, size);
     } else if (fun_name.rfind("__remill_write_memory", 0) == 0) {
-        handleRemillWrite(callee);
+        SVF::NodeID addrId = callNode->getArgument(1)->getId();
+        SVF::NodeID valueId = callNode->getArgument(2)->getId();
+        size_t size = WRITE_FNS_TO_SIZES.at(fun_name);
+
+        handleRemillWrite(addrId, valueId, size);
     } else if (SVF::SVFUtil::isExtCall(callee)) {
         // `@EXTERNAL.` calls
         updateStateOnExtCall(callNode);
@@ -1331,20 +1357,14 @@ void VSA::updateStateOnBinary(const SVF::BinaryOPStmt *binary) {
     case SVF::BinaryOPStmt::Add:
     case SVF::BinaryOPStmt::FAdd: {
         // Adding is always only done on variables
-        // TODO: assuming that RHS is always a constant, change if this
-        // is not the case
-        ValueSet vs = this->blockState.getSVFVarSet(left);
-        auto rightVar = binary->getOpVar(1);
-
-        int rhsConst =
-            this->getSVFVarSet(right, this->blockState).getConstant();
-        vs.adjust(rhsConst);
-
-        this->blockState.varState[resID] = vs;
+        this->blockState.varState[resID] =
+            this->getSVFVarSet(left, this->blockState) +
+            this->getSVFVarSet(right, this->blockState);
         break;
     }
     case SVF::BinaryOPStmt::Sub:
     case SVF::BinaryOPStmt::FSub: {
+        // Assumes RHS is always a constant
         ValueSet vs = this->blockState.getSVFVarSet(left);
         auto rightVar = binary->getOpVar(1);
 
@@ -1551,12 +1571,6 @@ void VSA::updateStateOnStore(const SVF::StoreStmt *store) {
     else if (this->blockState.isRegister(lhs->getName())) {
         ValueSet rhsSet = this->blockState.getSVFVarSet(rhs->getId());
         this->blockState.abstractStore.registers[lhs->getName()] = rhsSet;
-
-        for (auto kv : this->blockState.getRegisterSet(lhs->getName()).values) {
-            std::cout << "Register " << lhs->getName() << " has RIC "
-                      << kv.second.toString() << " at memory region "
-                      << kv.first << std::endl;
-        }
     }
 }
 
@@ -1622,10 +1636,6 @@ void VSA::updateStateOnBranch(const SVF::BranchStmt *branch) {
     // into `postBasicBlock`
     this->postBasicBlock[branch->getICFGNode()] = this->blockState;
     this->postBasicBlock[branch->getICFGNode()].nextPc = this->nextPc;
-
-    std::cout << "A-loc at position [rbp-0x54] now has value "
-              << this->blockState.abstractStore.alocs[ALoc{1, 12, 4}].getGlobal().toString()
-              << " at branch" << std::endl;
 
     // Clear all local variables
     this->blockState.varState.clear();

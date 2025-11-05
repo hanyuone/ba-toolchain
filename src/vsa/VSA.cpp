@@ -844,7 +844,6 @@ void VSA::handleFunctionStart(const SVF::ICFGNode *rspNode) {
     auto subStmt = SVF::SVFUtil::dyn_cast<SVF::BinaryOPStmt>(uncastSubStmt);
 
     ValueSet stackSizeSet = this->globalState[subStmt->getOpVarID(1)];
-    std::cout << "Stack size: " << stackSizeSet.getConstant() << std::endl;
 
     // Blocks 1, 2 and 3 are skipped, which contain 8 bytes total
     // Block 3, which handles the offset, has 4 bytes
@@ -1044,7 +1043,6 @@ void VSA::handleICFGCycle(const SVF::ICFGCycleWTO *cycle) {
  * @return True if it is feasible, false if it is infeasible
  */
 bool VSA::handleICFGNode(const SVF::ICFGNode *node) {
-    std::cout << "Entering node " << node->getId() << std::endl;
     bool isStart = isStartOfBasicBlock(node);
 
     if (isStart) {
@@ -1203,8 +1201,6 @@ void VSA::handleCallSite(const SVF::CallICFGNode *callNode) {
     // Get the callee function associated with the call site
     const SVF::FunObjVar *callee = callNode->getCalledFunction();
     std::string fun_name = callee->getName();
-    std::cout << "Calling function with name \"" << fun_name << "\""
-              << std::endl;
 
     if (fun_name.rfind("__remill_read_memory", 0) == 0) {
         SVF::NodeID retId = callNode->getRetICFGNode()->getActualRet()->getId();
@@ -1450,7 +1446,6 @@ void VSA::updateStateOnBinary(const SVF::BinaryOPStmt *binary) {
         this->blockState.varState[resID] = 0;
         break;
     case SVF::BinaryOPStmt::Shl:
-        std::cout << "Shifting left" << std::endl;
         this->blockState.varState[resID] =
             this->getSVFVarSet(left, this->blockState)
             << this->getSVFVarSet(right, this->blockState).getConstant();
@@ -1650,8 +1645,6 @@ void VSA::updateStateOnStore(const SVF::StoreStmt *store) {
     // Store value to register
     else if (this->blockState.isRegister(lhs->getName())) {
         ValueSet rhsSet = this->getSVFVarSet(rhs->getId(), this->blockState);
-        std::cout << "Storing value set " << rhsSet.toString()
-                  << " to register " << lhs->getName() << std::endl;
         this->blockState.abstractStore.registers[lhs->getName()] = rhsSet;
     }
 }

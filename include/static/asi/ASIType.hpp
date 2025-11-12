@@ -9,15 +9,23 @@ class ASIType {
     virtual size_t getSize() = 0;
     virtual std::string toString() = 0;
 
-    bool hasBufferOverflow() {
-        return this->overflow;
-    }
+    bool hasBufferOverflow() { return this->overflow; }
 
-    void setBufferOverflow(bool overflow) {
-        this->overflow = overflow;
-    }
+    void setBufferOverflow(bool overflow) { this->overflow = overflow; }
+
   private:
-    bool overflow;
+    bool overflow = false;
+};
+
+class ImpossibleType : public ASIType {
+  public:
+    ImpossibleType(size_t _bytes) : bytes(_bytes) {}
+
+    size_t getSize() override;
+    std::string toString() override;
+
+  private:
+    size_t bytes;
 };
 
 class IntType : public ASIType {
@@ -39,6 +47,8 @@ class ArrayType : public ASIType {
     size_t getSize() override;
     std::string toString() override;
 
+    ASIType *getChild();
+
   private:
     ASIType *childType;
     size_t children;
@@ -49,6 +59,7 @@ class StructType : public ASIType {
     size_t getSize() override;
     std::string toString() override;
 
+    std::vector<ASIType *> getChildren();
     void addChild(ASIType *);
 
   private:

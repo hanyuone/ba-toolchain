@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.23)
 
 project(
-  reconstructor
+  ba_toolchain
   VERSION 1.0
   DESCRIPTION "An external project example using SVF as a library"
   HOMEPAGE_URL "https://github.com/SVF-tools/SVF-example"
@@ -23,9 +23,9 @@ if (DEFINED ENV{LLVM_DIR})
     # Set the C++ standard to C++17 and configure compiler flags based on the build type
     set(CMAKE_CXX_STANDARD 17)
     if(CMAKE_BUILD_TYPE MATCHES "Debug")
-        set(CMAKE_CXX_FLAGS "-fPIC -std=gnu++17 -O0 -fno-rtti -Wno-deprecated -Werror")
+        set(CMAKE_CXX_FLAGS "-fPIC -std=gnu++17 -O0 -Wno-deprecated -Werror")
     else()
-        set(CMAKE_CXX_FLAGS "-fPIC -std=gnu++17 -O3 -fno-rtti -Wno-deprecated -Werror")
+        set(CMAKE_CXX_FLAGS "-fPIC -std=gnu++17 -O3 -Wno-deprecated -Werror")
     endif()
     set(CMAKE_C_FLAGS "-fPIC")
     # Check if compiler is GNU and version is less than 9
@@ -164,16 +164,16 @@ include_directories(SYSTEM ${Z3_INCLUDES})
 # ==============================================================================
 
 # Define the primary (minimal) example using SVF as library in an executable
-file(GLOB_RECURSE reconstructor_SRC CONFIGURE_DEPENDS
+file(GLOB_RECURSE ba_toolchain_SRC CONFIGURE_DEPENDS
     src/*.cpp
 )
-add_executable(reconstructor src/main.cpp ${reconstructor_SRC})
+add_executable(ba_toolchain src/main.cpp ${ba_toolchain_SRC})
 
 # Only link against SVF; LLVM & Z3 dependencies are resolved internally
-target_link_libraries(reconstructor PRIVATE ${llvm_libs} ${SVF_LIB})
+target_link_libraries(ba_toolchain PRIVATE ${llvm_libs} ${SVF_LIB})
 
 # Link to include folder
-target_include_directories(reconstructor PRIVATE "${CMAKE_CURRENT_LIST_DIR}/include")
+target_include_directories(ba_toolchain PRIVATE "${CMAKE_CURRENT_LIST_DIR}/include")
 
 # Set the executable example to install to the local directory (as prefix)
-install(TARGETS reconstructor RUNTIME DESTINATION bin)
+install(TARGETS ba_toolchain RUNTIME DESTINATION bin)

@@ -31,7 +31,7 @@ std::map<ALoc, ASIType *> reconstructTypes(SVF::ICFG *icfg) {
     ASI asi(accesses, alocs);
     asi.analyse();
 
-    return asi.getRegionsAndTypes();
+    return asi.getTypes();
 }
 
 int main(int argc, char *argv[]) {
